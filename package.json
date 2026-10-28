@@ -29,7 +29,7 @@
     "helmet": "^7.1.0",
     "morgan": "^1.10.0",
     "prompts": "^2.4.2",
-    "puppeteer": "^24.42.0",
+    "puppeteer": "^24.43.1",
     "unpacker": "^1.0.1"
   },
   "devDependencies": {
