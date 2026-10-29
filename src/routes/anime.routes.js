@@ -137,7 +137,20 @@ router.get(
 
     const resolvePromises = urls.map(async (url) => {
       try {
-        const directUrl = await resolveEmbedUrl(url);
+        let directUrl = null;
+        
+        // Intentar con el resolver normal (utils/resolvers)
+        try {
+          directUrl = await resolveEmbedUrl(url);
+        } catch (err) {
+          console.warn(`[RESOLVE NATIVO] Fallo en ${url}: ${err.message}. Intentando con Puppeteer...`);
+        }
+        
+        // Si falla, intentar con Puppeteer (download.service)
+        if (!directUrl || directUrl === url) {
+          directUrl = await downloadService.resolveEmbedUrl(url, {}, { url: url });
+        }
+
         if (directUrl && directUrl !== url) {
           let server = "unknown";
           if (url.includes("voe")) server = "voe";
@@ -148,20 +161,21 @@ router.get(
 
           return {
             success: true,
-            server,
-            mediaType: directUrl.includes(".m3u8") ? "hls" : "mp4",
-            streamUrl: directUrl,
-            resolvedFrom: url
+            data: {
+              streamUrl: directUrl,
+              server: server,
+              mediaType: directUrl.includes(".m3u8") ? "hls" : "mp4",
+              resolvedFrom: url
+            }
           };
         }
       } catch (err) {
-        console.warn(`[RESOLVE CASCADE] Fallo en ${url}: ${err.message}`);
+        console.warn(`[RESOLVE CASCADE] Fallo total en ${url}: ${err.message}`);
       }
       throw new Error("No se pudo resolver");
     });
 
     try {
-      // Carrera en paralelo: el primer servidor que resuelva con éxito entrega el OK e interrumpe la espera de los demás
       const fastestResult = await Promise.any(resolvePromises);
       return res.status(200).json(fastestResult);
     } catch (err) {

@@ -4,24 +4,37 @@ const { randomUUID } = require("node:crypto");
 const { pipeline } = require("node:stream/promises");
 const axios = require("axios");
 const cheerio = require("cheerio");
-const ffmpegPath = require("ffmpeg-static");
-const ffmpeg = require("fluent-ffmpeg");
-ffmpeg.setFfmpegPath(ffmpegPath);
 const { ApiError } = require("../utils/api-error");
 const animeService = require("./anime.service");
 const { extractVoe } = require("../utils/resolvers/voe.resolver");
 const { extractStreamwish } = require("../utils/resolvers/streamwish.resolver");
 const { extractStreamtape } = require("../utils/resolvers/streamtape.resolver");
 
+// 🔥 PARCHE VERCEL: No cargamos Puppeteer al inicio, solo dentro de la función.
 let puppeteerBrowser = null;
 
 async function getPuppeteerBrowser() {
   if (!puppeteerBrowser) {
-    const puppeteer = require("puppeteer");
-    puppeteerBrowser = await puppeteer.launch({
-      headless: true,
-      args: ["--no-sandbox", "--disable-setuid-sandbox"],
-    });
+    // Carga perezosa: Solo se ejecuta si alguien intenta scrapear/descargar
+    const puppeteer = require("puppeteer-core");
+    const chromium = require("@sparticuz/chromium-min");
+    
+    const isVercel = process.env.VERCEL || process.env.NOW_REGION;
+    
+    // URL del binario ligero de Chromium
+    const CHROMIUM_PATH = "https://github.com/Sparticuz/chromium/releases/download/v131.0.0/chromium-v131.0.0-pack.x64.tar";
+    
+    try {
+      puppeteerBrowser = await puppeteer.launch({
+        args: chromium.args,
+        defaultViewport: chromium.defaultViewport,
+        executablePath: isVercel ? await chromium.executablePath(CHROMIUM_PATH) : undefined,
+        headless: chromium.headless,
+      });
+    } catch (error) {
+      console.error("❌ Error crítico al lanzar el navegador en Vercel:", error);
+      throw new Error("No se pudo iniciar el navegador para el scraping.");
+    }
   }
   return puppeteerBrowser;
 }
@@ -50,20 +63,16 @@ async function resolveEmbedWithPuppeteer(url, referer) {
       }
     });
     
-    // Wait for page to fully load
     await page.goto(url, { waitUntil: "networkidle2", timeout: 30000 });
     
-    // Attempt to click play buttons to trigger video load
     try {
       const playBtnSelectors = '.play-button, button, .vjs-big-play-button, [role="button"], .jw-icon-display, .plyr__control--overlaid';
       const playBtn = await page.$(playBtnSelectors);
       if (playBtn) await playBtn.click();
     } catch(e) {}
 
-    // Wait for potential JS to execute and requests to fire
     await new Promise(r => setTimeout(r, 4000));
 
-    // Try clicking inside iframes (common in SPAs like new Filemoon)
     if (!interceptedUrl) {
       for (const frame of page.frames()) {
         try {
@@ -87,7 +96,6 @@ async function resolveEmbedWithPuppeteer(url, referer) {
     
     const $ = cheerio.load(html);
     
-    // Try many patterns
     const patterns = [
       /sources?\s*:\s*\[\s*\{[^}]*(?:file|src)\s*:\s*['"]([^'"]+)['"]/i,
       /"file"\s*:\s*"([^"]+)"/i,
@@ -107,13 +115,11 @@ async function resolveEmbedWithPuppeteer(url, referer) {
       }
     }
     
-    // Try video element
     const videoSrc = $("video").attr("src");
     if (videoSrc && isLikelyVideoUrl(videoSrc)) {
       return videoSrc;
     }
     
-    // Try data attributes
     const dataElements = $("[data-src], [data-source], [data-video], [data-file]");
     for (let i = 0; i < dataElements.length; i++) {
       const dataSrc = $(dataElements[i]).attr("data-src") || $(dataElements[i]).attr("data-source");
@@ -162,9 +168,18 @@ const HTML_HEADERS = {
 const SERVER_PRIORITY = ["yourupload", "pdrain", "1fichier", "mp4upload", "upnshare","hls", "mega"];
 
 function getDownloadsDir() {
-  const configuredPath = process.env.DOWNLOADS_DIR || "downloads";
-  const targetPath = path.resolve(process.cwd(), configuredPath);
-  fs.mkdirSync(targetPath, { recursive: true });
+  const isVercel = process.env.VERCEL || process.env.NOW_REGION;
+  const targetPath = isVercel 
+    ? "/tmp/downloads" 
+    : path.resolve(process.cwd(), process.env.DOWNLOADS_DIR || "downloads");
+    
+  if (!fs.existsSync(targetPath)) {
+    try {
+      fs.mkdirSync(targetPath, { recursive: true });
+    } catch (e) {
+      console.error("No se pudo crear la carpeta de descargas:", e);
+    }
+  }
   return targetPath;
 }
 
@@ -306,7 +321,6 @@ function findFirstUrl(payload, patterns) {
     }
   }
 
-  // Fallback: try to find any URL-like pattern with .m3u8 or .mp4
   const urlMatch = payload.match(/(https?:\/\/[^\s"'<>]+\.(?:m3u8|mp4)[^\s"'<>]*)/i);
   if (urlMatch && urlMatch[1]) {
     const candidate = normalizeExtractedUrl(urlMatch[1]);
@@ -345,7 +359,6 @@ function isLikelyVideoUrl(url) {
     }
   }
 
-  // Accept .mp4, .m3u8 (HLS), or direct video URLs
   const hasVideoExtension = /\.(?:mp4|m3u8)(?:\?|#|$)/i.test(url);
   return hasVideoExtension || lower.includes("video") || lower.includes("stream");
 }
@@ -384,7 +397,6 @@ async function resolveStreamwishUrl(url, referer) {
   debugLog("Streamwish", "Fetched HTML length", html.length);
   debugLog("Streamwish", "Content-Type", headers["content-type"]);
 
-  // First try to find .m3u8 URL (HLS stream)
   const m3u8Match = html.match(/(https?:\/\/[^\s"'<>]+\.m3u8[^\s"'<>]*)/i);
   if (m3u8Match && m3u8Match[1]) {
     const candidate = m3u8Match[1];
@@ -410,13 +422,11 @@ async function resolveStreamwishUrl(url, referer) {
     return extracted;
   }
 
-  // Try to find .m3u8 in any data attributes
   const dataMatch = html.match(/data-src=["']([^"']+\.m3u8[^"']*)["']/i);
   if (dataMatch && dataMatch[1] && !dataMatch[1].startsWith("blob:")) {
     return normalizeExtractedUrl(dataMatch[1]);
   }
 
-  // Try eval-based extraction: look for sources in script tags
   const scriptMatch = html.match(/<script[^>]*>([\s\S]*?var\s+sources\s*=\s*\[[\s\S]*?\];[\s\S]*?)<\/script>/i);
   if (scriptMatch) {
     const sourcesLines = scriptMatch[1];
@@ -619,7 +629,6 @@ async function resolveVoeUrl(url, referer) {
     const { html, headers } = await fetchHtmlWithHeaders(url, referer);
     debugLog("VOE", "Fetched HTML length", html.length);
 
-    // Check for redirect in page
     const redirectMatch = html.match(/window\.location\.href\s*=\s*['"](https?:\/\/[^'"]+)['"]/i);
     if (redirectMatch && redirectMatch[1]) {
       debugLog("VOE", "Following redirect to", redirectMatch[1]);
@@ -660,7 +669,6 @@ async function resolveVidhideUrl(url, referer) {
     const { html, headers } = await fetchHtmlWithHeaders(url, referer);
     debugLog("Vidhide", "Fetched HTML length", html.length);
 
-    // Try to find video data in player setup
     const extracted = findFirstUrl(html, [
       /sources?\s*:\s*\[\s*\{[^}]*(?:file|src)\s*:\s*["'](https?:\/\/[^"']+)["']/i,
       /"file"\s*:\s*"([^"]+)"/i,
@@ -672,12 +680,6 @@ async function resolveVidhideUrl(url, referer) {
     if (extracted) {
       debugLog("Vidhide", "Found URL", extracted);
       return extracted;
-    }
-
-    // Try to find in eval or decrypted content
-    // const evalMatch = html.match(/\$\.getJSON\(["'])([^"'"]+)\1/i);
-    if (evalMatch) {
-      debugLog("Vidhide", "Found JSON URL", evalMatch[2]);
     }
 
     debugLog("Vidhide", "No URL found");
@@ -854,7 +856,6 @@ async function resolveEmbedUrl(url, record, candidate) {
 
   debugLog("resolveEmbed", `Host: ${host}, Path: ${pathname}`, url);
 
-  // 1. SPECIFIC DOMAIN RESOLVERS FIRST
   if (/streamwish|sfastwish|flaswish/i.test(host)) {
     debugLog("resolveEmbed", "Using Streamwish resolver", null);
     const resolved = await resolveStreamwishUrl(url, referer);
@@ -949,18 +950,15 @@ async function resolveEmbedUrl(url, record, candidate) {
     throw new Error("No se pudo resolver enlace directo en MP4Upload");
   }
 
-  // 2. VOE AND DYNAMIC DOMAINS
   if (/voe\.sx/i.test(host) || /\/e\//.test(pathname)) {
     debugLog("resolveEmbed", "Using VOE resolver", null);
     const resolved = await resolveVoeUrl(url, referer);
     if (resolved) return resolved;
-    // Don't throw if it was a dynamic domain catch, let it fallback to Puppeteer
     if (/voe\.sx/i.test(host)) {
       throw new Error("No se pudo resolver enlace directo en VOE");
     }
   }
 
-  // 3. PUPPETEER PROTECTED SITE FALLBACK
   const isProtectedSite = /animeflv|streamwish|vidhide|mixdrop/i.test(host);
   if (isProtectedSite) {
     debugLog("resolveEmbed", "Using puppeteer for protected site", null);
@@ -968,7 +966,6 @@ async function resolveEmbedUrl(url, record, candidate) {
     if (resolved) return resolved;
   }
 
-  // Fallback: use puppeteer for any unresolved embed
   debugLog("resolveEmbed", "Trying puppeteer fallback", null);
   const puppeteerResolved = await resolveEmbedWithPuppeteer(url, referer);
   if (puppeteerResolved) {
@@ -1097,50 +1094,7 @@ function resolveDirectDownloadUrl(rawUrl, serverName) {
 }
 
 async function downloadHlsVideo(finalUrl, filePath, record, candidate) {
-  record.status = "downloading";
-  record.currentServer = candidate.server;
-  record.sourceUrl = finalUrl;
-  record.totalBytes = null;
-  record.downloadedBytes = 0;
-  record.progress = 1;
-  record.updatedAt = Date.now();
-
-  const referer = getRefererForUrl(candidate.url || record.url || finalUrl);
-
-  return new Promise((resolve, reject) => {
-    ffmpeg(finalUrl)
-      .inputOptions([
-        '-headers',
-        `User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36\r\nReferer: ${referer}\r\n`
-      ])
-      .outputOptions([
-        "-c copy",
-        "-bsf:a aac_adtstoasc"
-      ])
-      .output(filePath)
-      .on("start", () => {
-        record.status = "downloading";
-        record.progress = 1;
-        record.updatedAt = Date.now();
-      })
-      .on("progress", (progress) => {
-        if (progress.percent && progress.percent > 0) {
-          record.progress = Math.max(1, Math.min(99, Math.floor(progress.percent)));
-        } else {
-          // Si ffmpeg no nos da un %, subimos el progreso visualmente poco a poco
-          record.progress = Math.min(90, record.progress + 1);
-        }
-        record.updatedAt = Date.now();
-      })
-      .on("error", async (err) => {
-        await removeFileIfExists(filePath);
-        reject(new Error(`Transferencia fallida en ${candidate.server} (HLS): ${err.message}`));
-      })
-      .on("end", () => {
-        resolve();
-      })
-      .run();
-  });
+  throw new Error("La descarga de HLS está deshabilitada en este entorno (Sin FFmpeg).");
 }
 
 async function downloadFromUrl(record, candidate) {
@@ -1440,4 +1394,5 @@ module.exports = {
   createBatch,
   getBatch,
   getDownloadsDir,
+  resolveEmbedUrl, // <-- AGREGADO
 };
