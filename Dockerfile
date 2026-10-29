@@ -1,6 +1,5 @@
-FROM node:18-slim
+FROM node:22-slim
 
-# Instalamos las dependencias que necesita Chromium para funcionar en Linux
 RUN apt-get update && apt-get install -y \
     wget \
     gnupg \
