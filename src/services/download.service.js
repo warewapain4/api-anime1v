@@ -24,8 +24,12 @@ async function getPuppeteerBrowser() {
     // 🔥 Usamos la ruta del Chromium instalado en el Dockerfile
     const executablePath = process.env.PUPPETEER_EXECUTABLE_PATH || '/usr/bin/chromium';
 
-    // 🔥 CORRECCIÓN: Usamos la URL COMPLETA del proxy (con http://)
-    const proxyArgs = proxyUrl ? [`--proxy-server=${proxyUrl}`] : [];
+    // 🔥 CORRECCIÓN VITAL: Chromium solo acepta host y puerto, NO credenciales
+    let proxyArgs = [];
+    if (proxyUrl) {
+      const parsedProxy = new URL(proxyUrl);
+      proxyArgs = [`--proxy-server=${parsedProxy.hostname}:${parsedProxy.port}`];
+    }
     
     try {
       puppeteerBrowser = await puppeteer.launch({
@@ -52,7 +56,7 @@ async function resolveEmbedWithPuppeteer(url, referer) {
     const browser = await getPuppeteerBrowser();
     const page = await browser.newPage();
     
-    // 🔥 AUTENTICACIÓN DEL PROXY EN LA PÁGINA
+    // 🔥 AUTENTICACIÓN DEL PROXY EN LA PÁGINA (Aquí van las credenciales)
     if (proxyUrl) {
       const parsedProxy = new URL(proxyUrl);
       await page.authenticate({
