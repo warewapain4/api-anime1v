@@ -1,5 +1,6 @@
 FROM node:22-slim
 
+# Instalamos Chromium y todas las dependencias necesarias para que funcione en Linux
 RUN apt-get update && apt-get install -y \
     wget \
     gnupg \
@@ -20,8 +21,12 @@ RUN apt-get update && apt-get install -y \
     libxdamage1 \
     libxrandr2 \
     xdg-utils \
+    chromium \
     --no-install-recommends && \
     rm -rf /var/lib/apt/lists/*
+
+# Configuramos la ruta de Chromium para Puppeteer
+ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
 
 WORKDIR /app
 

@@ -15,30 +15,31 @@ const { extractStreamtape } = require("../utils/resolvers/streamtape.resolver");
 const proxyUrl = process.env.PROXY_URL;
 const proxyAgent = proxyUrl ? new HttpsProxyAgent(proxyUrl) : null;
 
-// 🔥 PARCHE VERCEL: No cargamos Puppeteer al inicio, solo dentro de la función.
 let puppeteerBrowser = null;
 
 async function getPuppeteerBrowser() {
   if (!puppeteerBrowser) {
-    // Carga perezosa: Solo se ejecuta si alguien intenta scrapear/descargar
     const puppeteer = require("puppeteer-core");
-    const chromium = require("@sparticuz/chromium-min");
     
-    // URL del binario ligero de Chromium
-    const CHROMIUM_PATH = "https://github.com/Sparticuz/chromium/releases/download/v131.0.0/chromium-v131.0.0-pack.x64.tar";
-    
+    // 🔥 Usamos la ruta del Chromium instalado en el Dockerfile
+    const executablePath = process.env.PUPPETEER_EXECUTABLE_PATH || '/usr/bin/chromium';
+
     // 🔥 CONFIGURACIÓN DEL PROXY EN PUPPETEER
     const proxyArgs = proxyUrl ? [`--proxy-server=${new URL(proxyUrl).host}`] : [];
     
     try {
       puppeteerBrowser = await puppeteer.launch({
-        args: [...chromium.args, ...proxyArgs],
-        defaultViewport: chromium.defaultViewport,
-        executablePath: await chromium.executablePath(CHROMIUM_PATH), // <-- CORREGIDO AQUÍ
-        headless: chromium.headless,
+        args: [
+          '--no-sandbox',
+          '--disable-setuid-sandbox',
+          ...proxyArgs
+        ],
+        defaultViewport: { width: 1280, height: 720 },
+        executablePath: executablePath,
+        headless: true,
       });
     } catch (error) {
-      console.error("❌ Error crítico al lanzar el navegador en Render/Vercel:", error);
+      console.error("❌ Error crítico al lanzar el navegador:", error);
       throw new Error("No se pudo iniciar el navegador para el scraping.");
     }
   }
@@ -390,7 +391,7 @@ async function fetchHtmlWithHeaders(url, referer) {
     headers,
     maxRedirects: 5,
     validateStatus: (status) => status >= 200 && status < 400,
-    httpsAgent: proxyAgent, // <-- AÑADIDO EL PROXY AQUÍ
+    httpsAgent: proxyAgent, // <-- PROXY AQUÍ
   });
 
   return { html: response.data, headers: response.headers };
@@ -520,7 +521,7 @@ async function resolveOneFichierUrl(url, referer) {
         ...(cookieHeader ? { Cookie: cookieHeader } : {}),
       },
       validateStatus: (status) => status >= 200 && status < 400,
-      httpsAgent: proxyAgent, // <-- AÑADIDO EL PROXY AQUÍ
+      httpsAgent: proxyAgent, // <-- PROXY AQUÍ
     }).catch((err) => {
       debugLog("1Fichier", "POST error", err.message);
       return null;
@@ -1143,7 +1144,7 @@ async function downloadFromUrl(record, candidate) {
           Referer: referer,
         },
         validateStatus: (status) => status >= 200 && status < 400,
-        httpsAgent: proxyAgent, // <-- AÑADIDO EL PROXY AQUÍ
+        httpsAgent: proxyAgent, // <-- PROXY AQUÍ
       });
     } catch (error) {
       throw new Error(`No se pudo abrir enlace ${candidate.server}: ${error.message}`);
