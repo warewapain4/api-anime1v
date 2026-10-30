@@ -4,7 +4,7 @@ const { randomUUID } = require("node:crypto");
 const { pipeline } = require("node:stream/promises");
 const axios = require("axios");
 const cheerio = require("cheerio");
-const { HttpsProxyAgent } = require("https-proxy-agent"); // <-- NUEVO: Agente de Proxy
+const { HttpsProxyAgent } = require("https-proxy-agent"); 
 const { ApiError } = require("../utils/api-error");
 const animeService = require("./anime.service");
 const { extractVoe } = require("../utils/resolvers/voe.resolver");
@@ -24,8 +24,6 @@ async function getPuppeteerBrowser() {
     const puppeteer = require("puppeteer-core");
     const chromium = require("@sparticuz/chromium-min");
     
-    const isVercel = process.env.VERCEL || process.env.NOW_REGION;
-    
     // URL del binario ligero de Chromium
     const CHROMIUM_PATH = "https://github.com/Sparticuz/chromium/releases/download/v131.0.0/chromium-v131.0.0-pack.x64.tar";
     
@@ -34,13 +32,13 @@ async function getPuppeteerBrowser() {
     
     try {
       puppeteerBrowser = await puppeteer.launch({
-        args: [...chromium.args, ...proxyArgs], // <-- AÑADIMOS LOS ARGUMENTOS DEL PROXY
+        args: [...chromium.args, ...proxyArgs],
         defaultViewport: chromium.defaultViewport,
-        executablePath: isVercel ? await chromium.executablePath(CHROMIUM_PATH) : undefined,
+        executablePath: await chromium.executablePath(CHROMIUM_PATH), // <-- CORREGIDO AQUÍ
         headless: chromium.headless,
       });
     } catch (error) {
-      console.error("❌ Error crítico al lanzar el navegador en Vercel:", error);
+      console.error("❌ Error crítico al lanzar el navegador en Render/Vercel:", error);
       throw new Error("No se pudo iniciar el navegador para el scraping.");
     }
   }
@@ -1414,5 +1412,5 @@ module.exports = {
   createBatch,
   getBatch,
   getDownloadsDir,
-  resolveEmbedUrl, // <-- EXPORTADO
+  resolveEmbedUrl,
 };
