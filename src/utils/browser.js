@@ -1,15 +1,22 @@
 const puppeteer = require('puppeteer-core');
-const chromium = require('@sparticuz/chromium-min');
 
 async function getBrowser() {
-  const isVercel = process.env.VERCEL || process.env.NOW_REGION;
-  const CHROMIUM_PATH = "https://github.com/Sparticuz/chromium/releases/download/v131.0.0/chromium-v131.0.0-pack.x64.tar";
+  // 🔥 Usamos la ruta del Chromium instalado en el Dockerfile
+  const executablePath = process.env.PUPPETEER_EXECUTABLE_PATH || '/usr/bin/chromium';
+
+  // 🔥 CONFIGURACIÓN DEL PROXY
+  const proxyUrl = process.env.PROXY_URL;
+  const proxyArgs = proxyUrl ? [`--proxy-server=${new URL(proxyUrl).host}`] : [];
 
   return await puppeteer.launch({
-    args: chromium.args,
-    defaultViewport: chromium.defaultViewport,
-    executablePath: isVercel ? await chromium.executablePath(CHROMIUM_PATH) : undefined,
-    headless: chromium.headless,
+    args: [
+      '--no-sandbox',
+      '--disable-setuid-sandbox',
+      ...proxyArgs
+    ],
+    defaultViewport: { width: 1280, height: 720 },
+    executablePath: executablePath,
+    headless: true,
   });
 }
 
