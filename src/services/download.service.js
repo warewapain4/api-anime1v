@@ -4,11 +4,16 @@ const { randomUUID } = require("node:crypto");
 const { pipeline } = require("node:stream/promises");
 const axios = require("axios");
 const cheerio = require("cheerio");
+const { HttpsProxyAgent } = require("https-proxy-agent"); // <-- NUEVO: Agente de Proxy
 const { ApiError } = require("../utils/api-error");
 const animeService = require("./anime.service");
 const { extractVoe } = require("../utils/resolvers/voe.resolver");
 const { extractStreamwish } = require("../utils/resolvers/streamwish.resolver");
 const { extractStreamtape } = require("../utils/resolvers/streamtape.resolver");
+
+// 🔥 CONFIGURACIÓN DEL PROXY RESIDENCIAL
+const proxyUrl = process.env.PROXY_URL;
+const proxyAgent = proxyUrl ? new HttpsProxyAgent(proxyUrl) : null;
 
 // 🔥 PARCHE VERCEL: No cargamos Puppeteer al inicio, solo dentro de la función.
 let puppeteerBrowser = null;
@@ -24,9 +29,12 @@ async function getPuppeteerBrowser() {
     // URL del binario ligero de Chromium
     const CHROMIUM_PATH = "https://github.com/Sparticuz/chromium/releases/download/v131.0.0/chromium-v131.0.0-pack.x64.tar";
     
+    // 🔥 CONFIGURACIÓN DEL PROXY EN PUPPETEER
+    const proxyArgs = proxyUrl ? [`--proxy-server=${new URL(proxyUrl).host}`] : [];
+    
     try {
       puppeteerBrowser = await puppeteer.launch({
-        args: chromium.args,
+        args: [...chromium.args, ...proxyArgs], // <-- AÑADIMOS LOS ARGUMENTOS DEL PROXY
         defaultViewport: chromium.defaultViewport,
         executablePath: isVercel ? await chromium.executablePath(CHROMIUM_PATH) : undefined,
         headless: chromium.headless,
@@ -44,6 +52,15 @@ async function resolveEmbedWithPuppeteer(url, referer) {
   try {
     const browser = await getPuppeteerBrowser();
     const page = await browser.newPage();
+    
+    // 🔥 AUTENTICACIÓN DEL PROXY EN LA PÁGINA
+    if (proxyUrl) {
+      const parsedProxy = new URL(proxyUrl);
+      await page.authenticate({
+        username: parsedProxy.username,
+        password: parsedProxy.password,
+      });
+    }
     
     await page.setUserAgent(
       "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
@@ -364,7 +381,7 @@ function isLikelyVideoUrl(url) {
 }
 
 async function fetchHtmlWithHeaders(url, referer) {
-  const timeout = Number(process.env.REQUEST_TIMEOUT_MS || 15000);
+  const timeout = Number(process.env.REQUEST_TIMEOUT_MS || 45000);
   const headers = { ...HTML_HEADERS };
   if (referer) {
     headers.Referer = referer;
@@ -375,6 +392,7 @@ async function fetchHtmlWithHeaders(url, referer) {
     headers,
     maxRedirects: 5,
     validateStatus: (status) => status >= 200 && status < 400,
+    httpsAgent: proxyAgent, // <-- AÑADIDO EL PROXY AQUÍ
   });
 
   return { html: response.data, headers: response.headers };
@@ -504,6 +522,7 @@ async function resolveOneFichierUrl(url, referer) {
         ...(cookieHeader ? { Cookie: cookieHeader } : {}),
       },
       validateStatus: (status) => status >= 200 && status < 400,
+      httpsAgent: proxyAgent, // <-- AÑADIDO EL PROXY AQUÍ
     }).catch((err) => {
       debugLog("1Fichier", "POST error", err.message);
       return null;
@@ -1126,6 +1145,7 @@ async function downloadFromUrl(record, candidate) {
           Referer: referer,
         },
         validateStatus: (status) => status >= 200 && status < 400,
+        httpsAgent: proxyAgent, // <-- AÑADIDO EL PROXY AQUÍ
       });
     } catch (error) {
       throw new Error(`No se pudo abrir enlace ${candidate.server}: ${error.message}`);
@@ -1394,5 +1414,5 @@ module.exports = {
   createBatch,
   getBatch,
   getDownloadsDir,
-  resolveEmbedUrl, // <-- AGREGADO
+  resolveEmbedUrl, // <-- EXPORTADO
 };

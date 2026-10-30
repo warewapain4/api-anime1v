@@ -26,6 +26,7 @@
     "dotenv": "^16.4.5",
     "express": "^4.19.2",
     "helmet": "^7.1.0",
+    "https-proxy-agent": "^9.1.0",
     "morgan": "^1.10.0",
     "prompts": "^2.4.2",
     "puppeteer-core": "^24.43.1",
