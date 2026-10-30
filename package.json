@@ -28,7 +28,6 @@
     "https-proxy-agent": "^9.1.0",
     "morgan": "^1.10.0",
     "prompts": "^2.4.2",
-    "puppeteer-core": "^24.43.1",
     "unpacker": "^1.0.1"
   },
   "devDependencies": {
